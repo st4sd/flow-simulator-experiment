@@ -1,0 +1,141 @@
+variables:
+  default:
+    global:
+      s3Folder: "my_simulation_folder"
+      centerlinesFile: "centerlines"
+      csvFile: "my_cases_file.csv"
+      numberOfCases: 3
+      binaryImage: "binary_image"
+
+blueprint:
+  default:
+    global:
+      resourceManager:
+        config:
+          walltime: 14400.0
+          backend: kubernetes
+  docker:
+    global:
+      resourceManager:
+        config:
+          backend: docker
+
+environments:
+  default:
+    scripts:
+      PATH: /scripts/bin:$PATH
+    simulator:
+      PATH: /root/simulator:/root/simulator/gmm:$PATH
+      PYTHONPATH: /root/simulator/gmm/modules:$PYTHONPATH
+
+application-dependencies:
+  default:
+  - simulations-data
+
+components:
+
+  - stage: 0
+    name: ExtractCaseFromCSV
+    command:
+      environment: scripts
+      executable: "gmm_extract_case.py"
+      arguments: "--replica '%(replica)s' --csv_file simulations-data/%(s3Folder)s/%(csvFile)s:ref ."
+    references:
+        - "simulations-data/%(s3Folder)s/%(csvFile)s:ref"
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        cpuUnitsPerCore: 1.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 256Mi
+    workflowAttributes:
+      replicate: "%(numberOfCases)s"
+      shutdownOn:
+        - Killed
+        - KnownIssue
+
+  - stage: 1
+    name: GMM
+    command:
+      environment: simulator
+      executable: "bin/run_gmm.sh"
+      arguments: "-c '%(centerlinesFile)s' -b '%(binaryImage)s' -f simulations-data/%(s3Folder)s:ref"
+    references:
+      - "simulations-data/%(s3Folder)s:ref"
+      - stage0.ExtractCaseFromCSV/case_input.json:copy
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        cpuUnitsPerCore: 1.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      numberThreads: 4
+      threadsPerCore: 1
+      memory: 5Gi
+    workflowAttributes:
+      shutdownOn:
+        - Killed
+        - KnownIssue
+
+  - stage: 1
+    name: ParsingGMMResults
+    command:
+      environment: simulator
+      executable: "bin/run_parsing_gmm.sh"
+      arguments: "-i stage1.GMM/case_input:ref"
+    references:
+      - stage1.GMM/case_input.json:copy
+      - stage1.GMM/case_input:ref
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        cpuUnitsPerCore: 1.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 256Mi
+    workflowAttributes:
+      shutdownOn:
+        - Killed
+        - KnownIssue
+
+  - stage: 2
+    name: AggregateGMMResults
+    command:
+      environment: scripts
+      executable: "gmm_aggregate.py"
+      arguments: "--case_folders stage1.ParsingGMMResults:ref"
+    references:
+      - stage1.ParsingGMMResults:ref
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        cpuUnitsPerCore: 1.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 256Mi
+    workflowAttributes:
+      shutdownOn:
+        - Killed
+        - KnownIssue
+      aggregate: True
+
+output:
+  Results:
+    data-in: "AggregateGMMResults/results.tgz:copy"
+    stages:
+      - 2
+
+platforms:
+  - openshift
+  - docker
+
+version: 0.0.1

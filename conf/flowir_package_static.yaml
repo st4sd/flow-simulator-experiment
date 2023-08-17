@@ -1,0 +1,196 @@
+variables:
+  default:
+    global:
+      numberOfNetworks: 30
+      s3Folder: "my_simulation_folder"
+      sampleFileName: "rock-centerlines.json"
+      voxelSize_m: 2.25e-6
+      capillaryLength_m: 4.5e-5
+      sampleSize_m: 3.0e-4
+      dynamicViscosity_Pas: 1.002e-3
+      temperature_K: 340.0
+      absolutePressure_Pa: 101325.0
+      pressureGradient_Pa: 10132.5
+
+blueprint:
+  default:
+    global:
+      resourceManager:
+        config:
+          walltime: 14400.0
+          backend: kubernetes
+  docker:
+    global:
+      resourceManager:
+        config:
+          backend: docker
+
+environments:
+  default:
+    scripts:
+      PATH: /scripts/bin:$PATH
+    simulator:
+      PATH: /root/simulator:/root/simulator/bin:$PATH
+
+application-dependencies:
+  default:
+  - simulations-data
+
+components:
+
+  - stage: 0
+    name: CapillaryNetwork
+    command:
+      environment: scripts
+      executable: "capillary_network.sh"
+      arguments: "-r '%(replica)s' -v '%(voxelSize_m)s' -c '%(capillaryLength_m)s' -s '%(sampleSize_m)s' -f simulations-data/%(s3Folder)s/%(sampleFileName)s:ref"
+    references:
+        - "simulations-data/%(s3Folder)s/%(sampleFileName)s:ref"
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        cpuUnitsPerCore: 1.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 5Gi
+    workflowAttributes:
+      replicate: "%(numberOfNetworks)s"
+      shutdownOn:
+        - Killed
+        - KnownIssue
+
+  - stage: 1
+    name: StaticSimulationConfigFile
+    command:
+      environment: scripts
+      executable: "static_sim_config_file.py"
+      arguments: ". --voxel_size '%(voxelSize_m)s' --dynamic_viscosity '%(dynamicViscosity_Pas)s' --temperature '%(temperature_K)s' --absolute_pressure '%(absolutePressure_Pa)s' --pressure_gradient '%(pressureGradient_Pa)s'"
+    references:
+      - stage0.CapillaryNetwork/centerlines.json:copy
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        cpuUnitsPerCore: 1.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 1Gi
+    workflowAttributes:
+      shutdownOn:
+        - Killed
+        - KnownIssue
+
+  - stage: 1
+    name: StaticSimulation_x
+    command:
+      environment: simulator
+      executable: "bin/run_simulation.sh"
+      arguments: "-a 'x'"
+    references:
+      - stage0.CapillaryNetwork/centerlines.json:copy
+      - stage1.StaticSimulationConfigFile/config_x.json:copy
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        cpuUnitsPerCore: 1.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 1Gi
+    workflowAttributes:
+      shutdownOn:
+        - Killed
+        - KnownIssue
+
+  - stage: 1
+    name: StaticSimulation_y
+    command:
+      environment: simulator
+      executable: "bin/run_simulation.sh"
+      arguments: "-a 'y'"
+    references:
+      - stage0.CapillaryNetwork/centerlines.json:copy
+      - stage1.StaticSimulationConfigFile/config_y.json:copy
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        cpuUnitsPerCore: 1.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 1Gi
+    workflowAttributes:
+      shutdownOn:
+        - Killed
+        - KnownIssue
+
+  - stage: 1
+    name: StaticSimulation_z
+    command:
+      environment: simulator
+      executable: "bin/run_simulation.sh"
+      arguments: "-a 'z'"
+    references:
+      - stage0.CapillaryNetwork/centerlines.json:copy
+      - stage1.StaticSimulationConfigFile/config_z.json:copy
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        cpuUnitsPerCore: 1.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 1Gi
+    workflowAttributes:
+      shutdownOn:
+        - Killed
+        - KnownIssue
+
+  - stage: 2
+    name: AggregateStaticResults
+    command:
+      environment: scripts
+      executable: "static_sim_aggregate.py"
+      arguments: "--result_files_paths stage1.StaticSimulation_x/static_results.h5:ref stage1.StaticSimulation_y/static_results.h5:ref stage1.StaticSimulation_z/static_results.h5:ref --capillary_data_files_paths stage0.CapillaryNetwork/capillary_data.txt:ref --centerlines_files_paths stage0.CapillaryNetwork/centerlines.json:ref"
+    references:
+      - stage0.CapillaryNetwork/capillary_data.txt:ref
+      - stage0.CapillaryNetwork/centerlines.json:ref
+      - stage1.StaticSimulation_x/static_results.h5:ref
+      - stage1.StaticSimulation_y/static_results.h5:ref
+      - stage1.StaticSimulation_z/static_results.h5:ref
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        cpuUnitsPerCore: 1.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 1Gi
+    workflowAttributes:
+      shutdownOn:
+        - Killed
+        - KnownIssue
+      aggregate: True
+
+output:
+  Permeability:
+    data-in: "AggregateStaticResults/permeability_out.csv:copy"
+    stages:
+      - 2
+  Centerlines:
+    data-in: "AggregateStaticResults/centerlines.tar:copy"
+    stages:
+      - 2
+
+platforms:
+  - openshift
+  - docker
+
+version: 0.0.1

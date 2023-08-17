@@ -1,0 +1,192 @@
+variables:
+  default:
+    global:
+      numberOfCenterlines: 30
+      s3Folder: "my_simulation_folder"
+      voxelSize_m: 2.25e-6
+      capillaryLength_m: 4.5e-5
+      sampleSize_m: 3.0e-4
+      contactAngle_deg: 0.0
+      linearMK: 0.0
+      interfacialTension_Nm: 0.04
+      temperature_K: 400.0
+      absolutePressure_Pa: 10000000.0
+      pressureGradient_Pa_m: 10e6
+      dynamicViscosityWater_Pas: 0.000260196
+      dynamicCiscosityCO2_Pas: 3.26e-5
+      initialTime_s: 0.0
+      finalTime_s: 0.05
+      timeStepSize_s: 0.001
+
+blueprint:
+  default:
+    global:
+      resourceManager:
+        config:
+          walltime: 14400.0
+          backend: kubernetes
+  docker:
+    global:
+      resourceManager:
+        config:
+          backend: docker
+
+environments:
+  default:
+    scripts:
+      PATH: /scripts/bin:$PATH
+    simulator:
+      PATH: /root/simulator:/root/simulator/bin:$PATH
+
+application-dependencies:
+  default:
+  - simulations-data
+
+components:
+  - stage: 0
+    name: ExtractCenterlines
+    command:
+      interpreter: "bash"
+      arguments: "tar -xf centerlines.tar"
+    references:
+      - "simulations-data/%(s3Folder)s/centerlines.tar:copy"
+    resourceManager:
+      config:
+        backend: local
+
+  - stage: 1
+    name: DynamicSimulationConfigFile
+    command:
+      environment: scripts
+      executable: "dynamic_sim_config_file.py"
+      arguments: "--replica '%(replica)s' --centerlines stage0.ExtractCenterlines:ref --voxel_size '%(sampleSize_m)s' --contact_angle '%(contactAngle_deg)s' --linear_mk '%(linearMK)s' --interfacial_tension '%(interfacialTension_Nm)s' --temperature '%(temperature_K)s' --absolute_pressure '%(absolutePressure_Pa)s' --pressure_gradient '%(pressureGradient_Pa_m)s' --dynamic_viscosity_water '%(dynamicViscosityWater_Pas)s' --dynamic_viscosity_co2 '%(dynamicCiscosityCO2_Pas)s' --initial_time '%(initialTime_s)s' --final_time '%(finalTime_s)s' --time_step_size '%(timeStepSize_s)s'"
+    references:
+      - stage0.ExtractCenterlines:ref
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        cpuUnitsPerCore: 1.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 1Gi
+    workflowAttributes:
+      replicate: "%(numberOfCenterlines)s"
+      shutdownOn:
+        - Killed
+        - KnownIssue
+
+  - stage: 2
+    name: DynamicSimulation_x
+    command:
+      environment: simulator
+      executable: "bin/run_simulation.sh"
+      arguments: "-a 'x'"
+    references:
+      - stage1.DynamicSimulationConfigFile/centerlines.json:copy
+      - stage1.DynamicSimulationConfigFile/config_x.json:copy
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        cpuUnitsPerCore: 4.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 5Gi
+    workflowAttributes:
+      shutdownOn:
+        - Killed
+        - KnownIssue
+
+  - stage: 2
+    name: DynamicSimulation_y
+    command:
+      environment: simulator
+      executable: "bin/run_simulation.sh"
+      arguments: "-a 'y'"
+    references:
+      - stage1.DynamicSimulationConfigFile/centerlines.json:copy
+      - stage1.DynamicSimulationConfigFile/config_y.json:copy
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        cpuUnitsPerCore: 4.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 5Gi
+    workflowAttributes:
+      shutdownOn:
+        - Killed
+        - KnownIssue
+
+  - stage: 2
+    name: DynamicSimulation_z
+    command:
+      environment: simulator
+      executable: "bin/run_simulation.sh"
+      arguments: "-a 'z'"
+    references:
+      - stage1.DynamicSimulationConfigFile/centerlines.json:copy
+      - stage1.DynamicSimulationConfigFile/config_z.json:copy
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        cpuUnitsPerCore: 4.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 5Gi
+    workflowAttributes:
+      shutdownOn:
+        - Killed
+        - KnownIssue
+
+  - stage: 3
+    name: AggregateDynamicResults
+    command:
+      environment: scripts
+      executable: "dynamic_sim_aggregate.py"
+      arguments: "--simulation_paths stage2.DynamicSimulation_x:ref stage2.DynamicSimulation_y:ref stage2.DynamicSimulation_z:ref"
+    references:
+      - stage2.DynamicSimulation_x:ref
+      - stage2.DynamicSimulation_y:ref
+      - stage2.DynamicSimulation_z:ref
+    resourceManager:
+      kubernetes:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        cpuUnitsPerCore: 1.0
+      docker:
+        image: quay.io/st4sd/community-applications/flow-simulator-scripts-mdlab:latest
+        platform: "linux/amd64"
+    resourceRequest:
+      memory: 1Gi
+    workflowAttributes:
+      shutdownOn:
+        - Killed
+        - KnownIssue
+      aggregate: True
+
+output:
+  Snapshots:
+    data-in: "AggregateDynamicResults/snapshots.tgz:copy"
+    stages:
+      - 3
+  Logs:
+    data-in: "AggregateDynamicResults/logs.tgz:copy"
+    stages:
+      - 3
+  ResumeFiles:
+    data-in: "AggregateDynamicResults/resume_files.tgz:copy"
+    stages:
+      - 3
+
+platforms:
+  - openshift
+  - docker
+
+version: 0.0.1

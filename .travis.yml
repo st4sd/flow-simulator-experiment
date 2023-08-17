@@ -1,0 +1,57 @@
+os: linux
+
+dist: bionic
+
+language: python
+
+python:
+  - "3.9"
+
+services: docker
+
+git:
+  depth: 5
+
+branches:
+  only:
+  - main
+
+addons:
+  apt:
+    update: true
+    packages:
+      - gettext
+
+install:
+  - pip install --quiet --upgrade pip
+
+before_script:
+  - export IMAGENAME="$QUAY_URL"/"$APPLICATION_NAME"-"$APPLICATION_MAINTAINER"
+  - export IMAGETAG="$(date '+%Y.%m.%d')-$(git rev-parse --short HEAD)"
+
+script:
+  # Connect to quay.io
+  - docker login -u "$QUAY_USERNAME" -p "$QUAY_API_KEY" quay.io
+
+  # Build scripts container image into quay.io
+  - docker image pull "$IMAGENAME":latest || true
+  - docker image build --cache-from "$IMAGENAME":latest
+                       --tag "$IMAGENAME":"$IMAGETAG"
+                       .
+  - docker image push "$IMAGENAME":"$IMAGETAG"
+
+  - if [ "$TRAVIS_BRANCH" == "main" ]; then
+      docker image tag "$IMAGENAME":"$IMAGETAG" "$IMAGENAME":latest;
+      docker image push "$IMAGENAME":latest;
+    fi;
+
+after_script:
+  - pip list
+
+env:
+  global:
+    - QUAY_USERNAME=st4sd+mdlab
+    - QUAY_URL=quay.io/st4sd/community-applications
+    - APPLICATION_NAME=flow-simulator-scripts
+    - APPLICATION_MAINTAINER=mdlab
+    # QUAY_API_KEY defined via web UI
