@@ -1,65 +1,38 @@
-# Integrated Flow Experiments
+# Flow Simulator Experiments
+
+This ST4SD experiment runs flow simulations in a capillary network, including the geometry modification effects caused by erosion, precipitation, dissolution and deposition.
 
 ## Run simulations using the Docker backend of ST4SD
 
 ### Prerequisites
 
 1. A recent version of python 3 - [python 3.7+](https://www.python.org/downloads/)
-2. The [docker](https://docs.docker.com/get-docker/) container runtime
+2. A container runtime like [docker](https://docs.docker.com/get-docker/) and [podman](https://podman.io/docs/installation)
 3. The [git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git) command-line utility
 
 
-### Instructions
+## Running Simulations Coupled with the Geometry Modification Module
 
-You can try out the experiment on your laptop by:
+You can try out the Geometry Modification Module experiment on your laptop by:
 
 1. creating a python virtual environment, activating it, and installing the python module `st4sd-runtime-core[deploy]`
 2. cloning this repository
 3. creating `simulations-data` folder to be used as an application dependency
 4. launching the experiment
 
-For example:
+For example, if you are using `docker` you can run :
 
 ```bash
-#!/usr/bin/env sh
-# Download virtual experiment
+: Download virtual experiment
 git clone https://github.com/st4sd/flow-simulator-experiment.git
 cd flow-simulator-experiment
-# Setup ST4SD runtime-core
+
+: Setup ST4SD Core
 python3 -m venv --copies venv
 . venv/bin/activate
-python3 -m pip install "st4sd-runtime-core[deploy]"
-# Run Experiment
-cat <<EOF >variables.yaml
-global:
-  variable1: <variable1_value>
-  variable2: <variable2_value>
-  variable3: <variable3_value>
-EOF
-time elaunch.py --platform docker --dockerExecutableOverride=/path/to/my/docker/executable \
-    -s simulations-data:/path/to/my/my-simulations-data/on/my-disk:copy \
-    -a variables.yaml  --manifest path/to/your/manifest.yaml path/to/your/flowir_package.yaml
-# See outputs of experiment
-output_dir=$(ls -td flowir_package*.instance | head -1)
-ls -lth ${output_dir}
-cat "${output_dir}/output/output.json"
-```
+python3 -m pip install "st4sd-runtime-core[develop]"
 
-If `podman` is the docker executable being used, it is necessary to run
-```bash
-podman machine set --rootful
-```
-before running
-```bash
-podman machine start
-```
-
-## Running Simulations Coupled with the Geometry Modification Module
-
-1. Fill the file `conf/flowir_package_gmm.yaml` with your input data.
-1. Create a new folder inside `simulations-data` with a `centerlines.json` file and a CSV file listing the input cases. You may also add a `binary_image.raw` file, but it is optional. GMM will use the provided `centerlines.json` if the `binary_image.raw` is not found.
-1. To create the `variables.yaml` file, run the following command replacing the values if needed:
-```bash
+: Run a Geometry Modification Module Experiment
 cat <<EOF >variables.yaml
 global:
   s3Folder: "my_simulation_folder"
@@ -68,25 +41,53 @@ global:
   numberOfCases: 3
   binaryImage: "binary_image"
 EOF
+time elaunch.py -l 40 --platform docker \
+    -s simulations-data:simulations-data:copy \
+    -a variables.yaml --manifest manifest.yaml conf/flowir_package_gmm.yaml
+
+: See outputs of experiment
+output_dir=$(ls -td flowir_package_gmm*.instance | head -1)
+results_dir=${output_dir}stages/stage2/AggregateGMMResults/
+echo The outputs of the experiment are in ${results_dir}
+ls -lth ${results_dir}
 ```
-1. Run `elaunch.py` command replacing the path to your `simulations-data` folder. If you are using docker, the `--dockerExecutableOverride` flag is not necessary.
+
+> **Note**: The above should take just a couple of minutes from start to finish.
+
+If you are using `podman` as your container runtime, you should configure it like this before running the experiment:
+
 ```bash
-time elaunch.py --platform docker --dockerExecutableOverride=/path/to/my/docker/executable \
-    -s simulations-data:/path/to/my/my-simulations-data/on/my-disk:copy \
+podman machine set --rootful
+```
+before running
+```bash
+podman machine start
+```
+
+Also, include
+
+```bash
+--dockerExecutableOverride=`which podman` 
+```
+
+to the command line arguments like so:
+
+```bash
+time elaunch.py -l 40 --platform docker --dockerExecutableOverride=`which podman` \
+    -s simulations-data:simulations-data:copy \
     -a variables.yaml --manifest manifest.yaml conf/flowir_package_gmm.yaml
 ```
 
 ## Running Static Simulations
 
-1. Fill the file `conf/flowir_package_static.yaml` with your input data.
-1. Create a new folder inside `simulations-data` with a `rock-centerlines.json` file. 
+1. Create a new folder inside `simulations-data` with a `centerlines.json` file. 
 1. To create the `variables.yaml` file, run the following command replacing the values if needed:
 ```bash
 cat <<EOF >variables.yaml
 global:
   numberOfNetworks: 30
   s3Folder: "my_simulation_folder"
-  sampleFileName: "rock-centerlines.json"
+  sampleFileName: "centerlines.json"
   voxelSize_m: 2.25e-6
   capillaryLength_m: 4.5e-5
   sampleSize_m: 3.0e-4
@@ -96,17 +97,28 @@ global:
   pressureGradient_Pa: 10132.5
 EOF
 ```
-1. Run `elaunch.py` command replacing the path to your `simulations-data` folder. If you are using docker, the `--dockerExecutableOverride` flag is not necessary.
+1. Run `elaunch.py` command replacing the path to your `simulations-data` folder. If you are using `docker`, run:
 ```bash
-time elaunch.py --platform docker --dockerExecutableOverride=/path/to/my/docker/executable \
-    -s simulations-data:/path/to/my/my-simulations-data/on/my-disk:copy \
+time elaunch.py -l 40 --platform docker \
+    -s simulations-data:simulations-data:copy \
+    -a variables.yaml --manifest manifest.yaml conf/flowir_package_static.yaml
+```
+If you are using `podman`, run:
+```bash
+time elaunch.py -l 40 --platform docker --dockerExecutableOverride=`which podman` \
+    -s simulations-data:simulations-data:copy \
     -a variables.yaml --manifest manifest.yaml conf/flowir_package_static.yaml
 ```
 
 ## Running Dynamic Simulations
 
-1. Fill the file `conf/flowir_package_dynamic.yaml` with your input data.
-1. Create a new folder inside `simulations-data` with a `centerlines.tar` file (see instructions about this file below).
+1. Create a new folder inside `simulations-data` with a `centerlines.tar` file (see instructions about this file below). It is possible to use `centerlines.tar` files generated by previous executions of [static simulations](#running-static-simulations). To use the `centerlines.tar` from the latest execution and copy it to `simulation-data/my_simulation_folder`, run:
+
+```bash
+output_dir=$(ls -td flowir_package_static-*.instance | head -1)
+cp "${output_dir}/stages/stage2/AggregateStaticResults/centerlines.tar" "simulations-data/my_simulation_folder/centerlines.tar"
+```
+
 1. To create the `variables.yaml` file, run the following command replacing the values if needed:
 ```bash
 cat <<EOF >variables.yaml
@@ -129,10 +141,16 @@ global:
   timeStepSize_s: 0.001
 EOF
 ```
-1. Run `elaunch.py` command replacing the path to your `simulations-data` folder. If you are using docker, the `--dockerExecutableOverride` flag is not necessary.
+1. Run `elaunch.py` command replacing the path to your `simulations-data` folder. If you are using `docker`, run:
 ```bash
-time elaunch.py --platform docker --dockerExecutableOverride=/path/to/my/docker/executable \
-    -s simulations-data:/path/to/my/my-simulations-data/on/my-disk:copy \
+time elaunch.py --platform docker \
+    -s simulations-data:simulations-data:copy \
+    -a variables.yaml --manifest manifest.yaml conf/flowir_package_dynamic.yaml
+```
+If you are using `podman`, run:
+```bash
+time elaunch.py --platform docker --dockerExecutableOverride=`which podman` \
+    -s simulations-data:simulations-data:copy \
     -a variables.yaml --manifest manifest.yaml conf/flowir_package_dynamic.yaml
 ```
 

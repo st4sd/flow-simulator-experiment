@@ -3,7 +3,7 @@ variables:
     global:
       numberOfNetworks: 30
       s3Folder: "my_simulation_folder"
-      sampleFileName: "rock-centerlines.json"
+      sampleFileName: "centerlines.json"
       voxelSize_m: 2.25e-6
       capillaryLength_m: 4.5e-5
       sampleSize_m: 3.0e-4

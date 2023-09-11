@@ -12,4 +12,4 @@ done
 
 ln -s /root/simulator/util ./util
 mkdir snapshots
-simulator.x --run_simulation config_${axis}.json
+flow-simulator.x --run_simulation config_${axis}.json
